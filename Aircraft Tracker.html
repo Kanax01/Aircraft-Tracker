@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Aircraft Tracker</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        body { 
+            margin: 0; 
+            padding: 0; 
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+        }
+        #map { 
+            width: 100%; 
+            height: 100%; 
+        }
+        .plane-icon { 
+            font-size: 18px; 
+            text-align: center; 
+        }
+        .info-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="info-panel">
+        <div>Tracking aircraft...</div>
+        <div id="update-status">Last update: Never</div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        // 1. Setup map centered on Sayville, NY
+        const map = L.map('map').setView([40.738, -73.082], 10);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        // 2. Track aircraft
+        const planes = {};
+        const updateSeconds = 5;
+        
+        function updatePlanes() {
+            fetch('https://opensky-network.org/api/states/all')
+                .then(response => {
+                    if (!response.ok) throw new Error('Network error');
+                    return response.json();
+                })
+                .then(data => {
+                    document.getElementById('update-status').textContent = 
+                        'Last update: ' + new Date().toLocaleTimeString();
+                    
+                    // Update existing planes
+                    data.states.forEach(plane => {
+                        const [id, callsign, , , , lon, lat, alt] = plane;
+                        if (!lat || !lon) return;
+                        
+                        if (planes[id]) {
+                            planes[id].marker.setLatLng([lat, lon]);
+                            if (planes[id].tooltip) {
+                                planes[id].marker.setTooltipContent(
+                                    `${callsign || 'Unknown'}<br>${alt ? Math.round(alt*3.28)+'ft' : ''}`
+                                );
+                            }
+                        } else {
+                            // Add new plane
+                            planes[id] = {
+                                marker: L.marker([lat, lon], {
+                                    icon: L.divIcon({
+                                        html: '✈',
+                                        className: 'plane-icon',
+                                        iconSize: [24, 24]
+                                    })
+                                }).addTo(map).bindTooltip(
+                                    `${callsign || 'Unknown'}<br>${alt ? Math.round(alt*3.28)+'ft' : ''}`,
+                                    {permanent: false, direction: 'right'}
+                                ),
+                                lastUpdate: Date.now()
+                            };
+                        }
+                        planes[id].lastUpdate = Date.now();
+                    });
+                    
+                    // Remove old planes
+                    const now = Date.now();
+                    Object.keys(planes).forEach(id => {
+                        if (now - planes[id].lastUpdate > updateSeconds * 2000) {
+                            map.removeLayer(planes[id].marker);
+                            delete planes[id];
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.log("Error fetching data:", error);
+                    document.getElementById('update-status').textContent = 
+                        'Connection error - retrying...';
+                })
+                .finally(() => {
+                    setTimeout(updatePlanes, updateSeconds * 1000);
+                });
+        }
+
+        // 3. Start tracking
+        updatePlanes();
+    </script>
+</body>
+</html>
